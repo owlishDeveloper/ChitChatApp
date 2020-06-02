@@ -6,12 +6,12 @@ const clientID = Math.floor(Math.random() * Math.floor(1000000));
 function connect() {
     connection = new WebSocket("ws://localhost:80/");
 
-    console.log("--- Created WebSocket... ---");
+    console.log(`--- Created WebSocket for client ${clientID}... ---`);
 
     connection.onopen = function(e) {
         document.getElementById("message").removeAttribute("disabled");
         document.getElementById("send").removeAttribute("disabled");
-        console.log("--- Opened connection... ---");
+        console.log(`--- Opened connection for client ${clientID}... ---`);
     };
 
     connection.onmessage = function(evt) {
