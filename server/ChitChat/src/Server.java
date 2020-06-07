@@ -1,5 +1,6 @@
 import java.io.IOException;
 import java.net.ServerSocket;
+import java.net.Socket;
 
 public class Server {
     public static void main(String[] args) {
@@ -8,10 +9,12 @@ public class Server {
 
             System.out.println(String.format("Server started on %s", server.getLocalPort()));
 
-            do {
-                new ClientConnection(server).start();
-            } while (!server.isClosed());
+            while (true) {
+                Socket connection = server.accept();
+                System.out.println("New client connected;");
 
+                new ClientConnectionHandler(connection).start();
+            }
 
         } catch (IOException e) {
             e.printStackTrace();
