@@ -1,7 +1,18 @@
 "use strict";
 
 let connection = null;
-const clientID = Math.floor(Math.random() * Math.floor(1000000));
+let clientID;
+
+function setUsername() {
+    console.log("--- Setting username... ---");
+    var msg = {
+      name: document.getElementById("username").value,
+      date: Date.now(),
+      id: clientID,
+      type: "username"
+    };
+    connection.send(JSON.stringify(msg));
+  }
 
 function connect() {
     connection = new WebSocket("ws://localhost:80/");
@@ -27,6 +38,7 @@ function connect() {
         switch(msg.type) {
           case "id":
             clientID = msg.id;
+            console.log(`--- Received ID for client: ${clientID}... ---`);
             setUsername();
             break;
           case "username":

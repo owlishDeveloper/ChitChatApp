@@ -1,13 +1,11 @@
 import java.io.*;
 import java.net.Socket;
-import java.nio.ByteBuffer;
-import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Arrays;
 import java.util.Base64;
 import java.util.Scanner;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -44,6 +42,56 @@ public class ClientConnectionHandler extends Thread {
                     output.write(response, 0, response.length);
                 }
                 System.out.println("Performed WebSocket handshake.");
+
+                // Generate a client ID and send it over
+                UUID clientId = UUID.randomUUID();
+                Thread.currentThread().setName(clientId.toString());
+                System.out.println(String.format("Set new thread name: %s", Thread.currentThread().getName()));
+                byte clientIdMessageStartByte = (byte) 129; // 1000 0001 - not a frame, text message
+                byte[] clientIdMessagePayload = String.format("{\"type\":\"id\",\"id\":\"%s\"}", clientId.toString()).getBytes(StandardCharsets.UTF_8);
+                long clientIdMessageLength = clientIdMessagePayload.length;
+                byte[] clientIdMessageLength_bytes;
+                if (clientIdMessageLength == 255) {
+                    clientIdMessageLength_bytes = new byte[8];
+                    clientIdMessageLength_bytes[7] = (byte) clientIdMessageLength;
+                    clientIdMessageLength >>>= 8;
+                    clientIdMessageLength_bytes[6] = (byte) clientIdMessageLength;
+                    clientIdMessageLength >>>= 8;
+                    clientIdMessageLength_bytes[5] = (byte) clientIdMessageLength;
+                    clientIdMessageLength >>>= 8;
+                    clientIdMessageLength_bytes[4] = (byte) clientIdMessageLength;
+                    clientIdMessageLength >>>= 8;
+                    clientIdMessageLength_bytes[3] = (byte) clientIdMessageLength;
+                    clientIdMessageLength >>>= 8;
+                    clientIdMessageLength_bytes[2] = (byte) clientIdMessageLength;
+                    clientIdMessageLength >>>= 8;
+                    clientIdMessageLength_bytes[1] = (byte) clientIdMessageLength;
+                    clientIdMessageLength >>>= 8;
+                    clientIdMessageLength_bytes[0] = (byte) clientIdMessageLength;
+                } else if (clientIdMessageLength == 254) {
+                    clientIdMessageLength_bytes = new byte[2];
+                    clientIdMessageLength_bytes[1] = (byte) clientIdMessageLength;
+                    clientIdMessageLength >>>= 8;
+                    clientIdMessageLength_bytes[0] = (byte) clientIdMessageLength;
+                } else {
+                    clientIdMessageLength_bytes = new byte[1];
+                    clientIdMessageLength_bytes[0] = (byte) clientIdMessageLength;
+                }
+
+                byte[] clientIdMessage = new byte[1 + clientIdMessageLength_bytes.length + clientIdMessagePayload.length];
+                clientIdMessage[0] = clientIdMessageStartByte;
+                System.arraycopy(clientIdMessageLength_bytes,
+                        0,
+                        clientIdMessage,
+                        1,
+                        clientIdMessageLength_bytes.length);
+                System.arraycopy(clientIdMessagePayload,
+                        0,
+                        clientIdMessage,
+                        clientIdMessageLength_bytes.length + 1,
+                        clientIdMessagePayload.length);
+
+                output.write(clientIdMessage, 0, clientIdMessage.length);
 
                 // Reading messages
                 while (true) {
