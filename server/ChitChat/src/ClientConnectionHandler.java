@@ -1,3 +1,5 @@
+import com.google.gson.Gson;
+
 import java.io.*;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
@@ -11,6 +13,7 @@ import java.util.regex.Pattern;
 
 public class ClientConnectionHandler extends Thread {
     private final Socket connection;
+    private final Gson gson = new Gson();
 
     public ClientConnectionHandler(Socket connection) {
         this.connection = connection;
@@ -47,53 +50,11 @@ public class ClientConnectionHandler extends Thread {
                 UUID clientId = UUID.randomUUID();
                 Thread.currentThread().setName(clientId.toString());
                 System.out.println(String.format("Set new thread name: %s", Thread.currentThread().getName()));
-                byte clientIdMessageStartByte = (byte) 129; // 1000 0001 - not a frame, text message
-                byte[] clientIdMessagePayload = String.format("{\"type\":\"id\",\"id\":\"%s\"}", clientId.toString()).getBytes(StandardCharsets.UTF_8);
-                long clientIdMessageLength = clientIdMessagePayload.length;
-                byte[] clientIdMessageLength_bytes;
-                if (clientIdMessageLength == 255) {
-                    clientIdMessageLength_bytes = new byte[8];
-                    clientIdMessageLength_bytes[7] = (byte) clientIdMessageLength;
-                    clientIdMessageLength >>>= 8;
-                    clientIdMessageLength_bytes[6] = (byte) clientIdMessageLength;
-                    clientIdMessageLength >>>= 8;
-                    clientIdMessageLength_bytes[5] = (byte) clientIdMessageLength;
-                    clientIdMessageLength >>>= 8;
-                    clientIdMessageLength_bytes[4] = (byte) clientIdMessageLength;
-                    clientIdMessageLength >>>= 8;
-                    clientIdMessageLength_bytes[3] = (byte) clientIdMessageLength;
-                    clientIdMessageLength >>>= 8;
-                    clientIdMessageLength_bytes[2] = (byte) clientIdMessageLength;
-                    clientIdMessageLength >>>= 8;
-                    clientIdMessageLength_bytes[1] = (byte) clientIdMessageLength;
-                    clientIdMessageLength >>>= 8;
-                    clientIdMessageLength_bytes[0] = (byte) clientIdMessageLength;
-                } else if (clientIdMessageLength == 254) {
-                    clientIdMessageLength_bytes = new byte[2];
-                    clientIdMessageLength_bytes[1] = (byte) clientIdMessageLength;
-                    clientIdMessageLength >>>= 8;
-                    clientIdMessageLength_bytes[0] = (byte) clientIdMessageLength;
-                } else {
-                    clientIdMessageLength_bytes = new byte[1];
-                    clientIdMessageLength_bytes[0] = (byte) clientIdMessageLength;
-                }
-
-                byte[] clientIdMessage = new byte[1 + clientIdMessageLength_bytes.length + clientIdMessagePayload.length];
-                clientIdMessage[0] = clientIdMessageStartByte;
-                System.arraycopy(clientIdMessageLength_bytes,
-                        0,
-                        clientIdMessage,
-                        1,
-                        clientIdMessageLength_bytes.length);
-                System.arraycopy(clientIdMessagePayload,
-                        0,
-                        clientIdMessage,
-                        clientIdMessageLength_bytes.length + 1,
-                        clientIdMessagePayload.length);
-
+                Message m = new Message(clientId);
+                byte[] clientIdMessage = serialize(m);
                 output.write(clientIdMessage, 0, clientIdMessage.length);
 
-                // Reading messages
+                // Deserializing messages
                 while (true) {
                     System.out.println("Listening for messages...");
 
@@ -132,15 +93,29 @@ public class ClientConnectionHandler extends Thread {
                     // Next 4 bytes are the masking key to decode the message
                     byte[] key = new byte[] { (byte)input.read(), (byte)input.read(), (byte)input.read(), (byte)input.read() };
 
-                    // Get and decode the message
+                    // Read and decode the message
                     byte[] decodedMessage = new byte[Math.toIntExact(messageLength)];
                     for (int i = 0; i < messageLength; i++) {
                         decodedMessage[i] = (byte) (input.read() ^ key[i & 0x3]);
                     }
 
-                    String message = new String(decodedMessage);
+                    // Deserialize
+                    String messageString = new String(decodedMessage);
+                    System.out.println(String.format("Received message: %s", messageString));
+                    Message message = gson.fromJson(messageString, Message.class);
 
-                    System.out.println(String.format("Received message: %s", message));
+                    // Process
+                    switch (message.type) {
+                        case "username":
+                            String[] users = { message.username }; // todo this needs to be shared state for threads
+                            Message usernameMessage = new Message(users);
+                            byte [] usernameMessageBytes = serialize(usernameMessage);
+                            output.write(usernameMessageBytes, 0, usernameMessageBytes.length);
+                    }
+
+                    // serialize the message back and send to all clients
+                    byte[] sendBack = serialize(message);
+                    output.write(sendBack, 0, sendBack.length);
                 }
 
             } catch (NoSuchAlgorithmException e) {
@@ -150,6 +125,64 @@ public class ClientConnectionHandler extends Thread {
         } catch (IOException e) {
             e.printStackTrace();
         }
+    }
+
+    /**
+     * Helper function to convert a Message object into valid full WebSocket message
+     * in the form of array of bytes ready to send over network.
+     *
+     * @param message - Message object to serialize
+     * @return byte[] - WebSocket message ready to be sent
+     */
+    private byte[] serialize(Message message) {
+        byte startByte = (byte) 129; // 1000 0001 - not a frame, text message
+
+        byte[] payload = gson.toJson(message).getBytes(StandardCharsets.UTF_8);
+
+        long messageLength = payload.length;
+        byte[] messageLength_bytes;
+        if (messageLength == 255) {
+            messageLength_bytes = new byte[8];
+            messageLength_bytes[7] = (byte) messageLength;
+            messageLength >>>= 8;
+            messageLength_bytes[6] = (byte) messageLength;
+            messageLength >>>= 8;
+            messageLength_bytes[5] = (byte) messageLength;
+            messageLength >>>= 8;
+            messageLength_bytes[4] = (byte) messageLength;
+            messageLength >>>= 8;
+            messageLength_bytes[3] = (byte) messageLength;
+            messageLength >>>= 8;
+            messageLength_bytes[2] = (byte) messageLength;
+            messageLength >>>= 8;
+            messageLength_bytes[1] = (byte) messageLength;
+            messageLength >>>= 8;
+            messageLength_bytes[0] = (byte) messageLength;
+        } else if (messageLength == 254) {
+            messageLength_bytes = new byte[2];
+            messageLength_bytes[1] = (byte) messageLength;
+            messageLength >>>= 8;
+            messageLength_bytes[0] = (byte) messageLength;
+        } else {
+            messageLength_bytes = new byte[1];
+            messageLength_bytes[0] = (byte) messageLength;
+        }
+
+        byte[] messageBytes = new byte[1 + messageLength_bytes.length + payload.length];
+
+        messageBytes[0] = startByte;
+        System.arraycopy(messageLength_bytes,
+                0,
+                messageBytes,
+                1,
+                messageLength_bytes.length);
+        System.arraycopy(payload,
+                0,
+                messageBytes,
+                messageLength_bytes.length + 1,
+                payload.length);
+
+        return messageBytes;
     }
 
     public Boolean connected() {

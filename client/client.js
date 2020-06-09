@@ -6,7 +6,7 @@ let clientID;
 function setUsername() {
     console.log("--- Setting username... ---");
     var msg = {
-      name: document.getElementById("username").value,
+      username: document.getElementById("username").value,
       date: Date.now(),
       id: clientID,
       type: "username"
@@ -42,13 +42,13 @@ function connect() {
             setUsername();
             break;
           case "username":
-            text = `<b>User <em>${msg.name}</em> signed in at ${timeStr}</b><br>`;
+            text = `<b>User <em>${msg.username}</em> signed in at ${timeStr}</b><br>`;
             break;
           case "message":
-            text = `(${timeStr}) <b>${msg.name}</b>: ${msg.text}<br>`;
+            text = `(${timeStr}) <b>${msg.username}</b>: ${msg.text}<br>`;
             break;
           case "rejectusername":
-            text = `<b>Your username has been set to <em>${msg.name}</em> because the name you chose is in use.</b><br>`;
+            text = `<b>Your username has been set to <em>${msg.username}</em> because the name you chose is in use.</b><br>`;
             break;
           case "userlist":
             var ul = "";
