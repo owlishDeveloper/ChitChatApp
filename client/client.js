@@ -5,27 +5,44 @@ let clientID;
 
 function setUsername() {
     console.log("--- Setting username... ---");
+    const usernameField = document.getElementById("username");
+    if (!usernameField.value || usernameField.value.match(/^\s+$/)) {
+        alert("Please enter human-readable username");
+        return;
+    }
     var msg = {
-      username: document.getElementById("username").value,
-      date: Date.now(),
-      id: clientID,
-      type: "username"
+        username: usernameField.value,
+        date: Date.now(),
+        id: clientID,
+        type: "username",
     };
     connection.send(JSON.stringify(msg));
-  }
+}
 
 function connect() {
+    const usernameField = document.getElementById("username");
+    if (!usernameField.value || usernameField.value.match(/^\s+$/)) {
+        alert("Please enter human-readable username");
+        return;
+    }
     connection = new WebSocket("ws://localhost:80/");
 
     console.log(`--- Created WebSocket for client ${clientID}... ---`);
 
-    connection.onopen = function(e) {
-        document.getElementById("message").removeAttribute("disabled");
+    connection.onopen = function (e) {
+        const messageField = document.getElementById("message");
+        messageField.removeAttribute("disabled");
+        messageField.focus();
         document.getElementById("send").removeAttribute("disabled");
-        console.log(`--- Opened connection for client ${clientID}... ---`);
+
+        const loginButton = document.getElementById("login");
+        loginButton.setAttribute("onClick", "setUsername()");
+        loginButton.value = "Change username";
+
+        console.log(`--- Opened connection for client... ---`);
     };
 
-    connection.onmessage = function(evt) {
+    connection.onmessage = function (evt) {
         console.log("--- Received message... ---");
         let f = document.getElementById("chatbox").contentDocument;
         let text = "";
@@ -34,58 +51,69 @@ function connect() {
         console.dir(msg);
         let time = new Date(msg.date);
         let timeStr = time.toLocaleTimeString();
-    
-        switch(msg.type) {
-          case "id":
-            clientID = msg.id;
-            console.log(`--- Received ID for client: ${clientID}... ---`);
-            setUsername();
-            break;
-          case "username":
-            text = `<b>User <em>${msg.username}</em> signed in at ${timeStr}</b><br>`;
-            break;
-          case "message":
-            text = `(${timeStr}) <b>${msg.username}</b>: ${msg.text}<br>`;
-            break;
-          case "rejectusername":
-            text = `<b>Your username has been set to <em>${msg.username}</em> because the name you chose is in use.</b><br>`;
-            break;
-          case "userlist":
-            var ul = "";
-            var i;
-    
-            for (i=0; i < msg.users.length; i++) {
-              ul += msg.users[i] + "<br>";
-            }
-            document.getElementById("userlistbox").innerHTML = ul;
-            break;
+
+        switch (msg.type) {
+            case "id":
+                clientID = msg.id;
+                console.log(`--- Received ID for client: ${clientID}... ---`);
+                setUsername();
+                break;
+            case "username":
+                text = `<b>User <em>${msg.username}</em> signed in at ${timeStr}</b><br>`;
+                break;
+            case "message":
+                text = `(${timeStr}) <b>${msg.username}</b>: ${msg.text}<br>`;
+                break;
+            case "rejectusername":
+                text = `<b>Your username has been set to <em>${msg.username}</em> because the name you chose is in use.</b><br>`;
+                break;
+            case "userlist":
+                var ul = "";
+                var i;
+
+                for (i = 0; i < msg.users.length; i++) {
+                    ul += msg.users[i] + "<br>";
+                }
+                document.getElementById("userlistbox").innerHTML = ul;
+                break;
         }
-    
+
         if (text.length) {
-          f.write(text);
-          document.getElementById("chatbox").contentWindow.scrollByPages(1);
+            f.write(text);
+            document.getElementById("chatbox").contentWindow.scrollByPages(1);
         }
     };
-
 }
 
 function send() {
     console.log("--- Sending message... ---");
     const messagebox = document.getElementById("message");
     var msg = {
-      text: messagebox.value,
-      type: "message",
-      id: clientID,
-      date: Date.now()
+        text: messagebox.value,
+        type: "message",
+        id: clientID,
+        date: Date.now(),
     };
     connection.send(JSON.stringify(msg));
     messagebox.value = "";
 }
 
 function handleKey(evt) {
+    console.log(evt);
     if (evt.keyCode === 13 || evt.keyCode === 14) {
-      if (!document.getElementById("send").disabled) {
-        send();
-      }
+        switch (evt.target.id) {
+            case "message":
+                if (!document.getElementById("send").disabled) {
+                    send();
+                }
+                break;
+            case "username":
+                if (clientID) {
+                    setUsername();
+                } else {
+                    connect();
+                }
+                break;
+        }
     }
-  }
+}

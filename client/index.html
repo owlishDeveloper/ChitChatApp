@@ -12,8 +12,8 @@
 
         <div>
             <label for="username">Enter your username:</label>
-            <input type="text" id="username" name="username" autocomplete="off" autofocus>
-            <input type="button" name="login" value="Enter chat" onclick="connect()">
+            <input type="text" id="username" name="username" autocomplete="off" onkeyup="handleKey(event)" autofocus>
+            <input type="button" id="login" name="login" value="Enter chat" onclick="connect()">
         </div>
 
         <table border="0" width="100%">
