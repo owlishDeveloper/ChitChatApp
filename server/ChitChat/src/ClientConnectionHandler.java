@@ -5,18 +5,19 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Base64;
-import java.util.Scanner;
-import java.util.UUID;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class ClientConnectionHandler extends Thread {
     private final Socket connection;
     private final Gson gson = new Gson();
+    private final ConcurrentHashMap<String, OutputStream> usernameToClientOutput;
 
-    public ClientConnectionHandler(Socket connection) {
+    public ClientConnectionHandler(Socket connection, ConcurrentHashMap<String, OutputStream> usernameToClientOutput) {
         this.connection = connection;
+        this.usernameToClientOutput = usernameToClientOutput;
     }
 
     @Override
@@ -107,15 +108,32 @@ public class ClientConnectionHandler extends Thread {
                     // Process
                     switch (message.type) {
                         case "username":
-                            String[] users = { message.username }; // todo this needs to be shared state for threads
+                            usernameToClientOutput.put(message.username, output);
+                            Set<String> users = usernameToClientOutput.keySet();
                             Message usernameMessage = new Message(users);
                             byte [] usernameMessageBytes = serialize(usernameMessage);
-                            output.write(usernameMessageBytes, 0, usernameMessageBytes.length);
+                            usernameToClientOutput.forEach((k, v) -> {
+                                try {
+                                    v.write(usernameMessageBytes, 0, usernameMessageBytes.length);
+                                } catch (IOException e) {
+                                    e.printStackTrace();
+                                }
+                            });
+                            break;
+                        case "message":
+                            message.setUsername(usernameToClientOutput.get(message.id)); // todo lookup username by ID
+                            break;
                     }
 
                     // serialize the message back and send to all clients
                     byte[] sendBack = serialize(message);
-                    output.write(sendBack, 0, sendBack.length);
+                    usernameToClientOutput.forEach((k, v) -> {
+                        try {
+                            v.write(sendBack, 0, sendBack.length);
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    });
                 }
 
             } catch (NoSuchAlgorithmException e) {
