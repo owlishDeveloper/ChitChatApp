@@ -48,9 +48,6 @@ public class ClientConnectionHandler extends Thread {
                 }
                 System.out.println("Performed WebSocket handshake.");
 
-                // Add connection to the shared state
-                clientsDirectory.addConnection(clientId, output);
-
                 // Get the client ID and send it over
                 Message m = new Message(clientId);
                 byte[] clientIdMessage = serialize(m);
@@ -111,21 +108,23 @@ public class ClientConnectionHandler extends Thread {
 
                     // Process
                     switch (message.type) {
-                        case "username":
-                            String newUsername = clientsDirectory.uniquifyAndChangeName(clientId, message.username);
-
-                            if (!message.username.equals(newUsername)) {
-                                Message rejectUserMessage = new Message(newUsername, clientId);
-                                byte[] rejectUserMessageSerialized = serialize(rejectUserMessage);
-                                output.write(rejectUserMessageSerialized, 0, rejectUserMessageSerialized.length);
-                            }
-                            message.username = newUsername;
-
-                            Set<String> users = clientsDirectory.getUserlist();
-                            Message userlistMessage = new Message(users);
-                            clientsDirectory.sendToAll(serialize(userlistMessage));
-
+                        case "login":
+                            // Add connection to the shared state
+                            String ensuredUniqueName = clientsDirectory.addConnection(clientId, output, message.username);
+                            compareAndMaybeSendRejectuser(message.username, ensuredUniqueName, output);
+                            message.username = ensuredUniqueName;
+                            broadcastUserlist();
                             break;
+
+                        case "username":
+                            String oldName = clientsDirectory.lookupUsername(clientId);
+                            String newUsername = clientsDirectory.uniquifyAndChangeName(clientId, message.username);
+                            compareAndMaybeSendRejectuser(message.username, newUsername, output);
+                            message.username = oldName;
+                            message.newUsername = newUsername;
+                            broadcastUserlist();
+                            break;
+
                         case "message":
                             if (message.text.matches("\\s*")) { // don't send empty messages
                                 continue;
@@ -154,6 +153,23 @@ public class ClientConnectionHandler extends Thread {
     }
 
     /**
+     * Helper method to avoid repeating the same sequence of steps to compare two names,
+     * and, if they are different, to warn the user that they chose a name that's already in use.
+     *
+     * @param oldUsername
+     * @param newUsername
+     * @param output
+     * @throws IOException
+     */
+    private void compareAndMaybeSendRejectuser(String oldUsername, String newUsername, OutputStream output) throws IOException {
+        if (!oldUsername.equals(newUsername)) {
+            Message rejectUserMessage = new Message(newUsername, clientId);
+            byte[] rejectUserMessageSerialized = serialize(rejectUserMessage);
+            output.write(rejectUserMessageSerialized, 0, rejectUserMessageSerialized.length);
+        }
+    }
+
+    /**
      * Helper method to avoid repeating the same sequence of steps to cleanup the shared state
      * and notify other clients that this user has left
      */
@@ -163,8 +179,17 @@ public class ClientConnectionHandler extends Thread {
         clientsDirectory.cleanupConnection(clientId);
 
         // notify other clients
+        broadcastUserlist();
+        Message userleftMessage = new Message(username);
+        clientsDirectory.sendToAll(serialize(userleftMessage));
+    }
+
+    /**
+     * Helper method to avoid repeating the same sequence of steps to broadcast userlist
+     */
+    private void broadcastUserlist() {
         Set<String> users = clientsDirectory.getUserlist();
-        Message userlistMessage = new Message(username, users);
+        Message userlistMessage = new Message(users);
         clientsDirectory.sendToAll(serialize(userlistMessage));
     }
 

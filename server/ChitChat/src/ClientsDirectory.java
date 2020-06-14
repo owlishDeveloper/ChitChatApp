@@ -10,31 +10,45 @@ public class ClientsDirectory {
     private Lock readLock = lock.readLock();
     private Lock writeLock = lock.writeLock();
 
-    public void addConnection(UUID id, OutputStream stream) {
-        ClientInfo info = new ClientInfo(stream);
+    public String addConnection(UUID id, OutputStream stream, String username) {
         writeLock.lock();
         try {
-            data.put(id, info);
+            String ensuredUnique = uniquifyName(username);
+            data.put(id, new ClientInfo(stream, ensuredUnique));
+
+            return ensuredUnique;
         } finally {
             writeLock.unlock();
         }
     }
 
     public String uniquifyAndChangeName(UUID id, String newUsername) {
-        int i = 1;
         writeLock.lock();
+        try {
+            String ensuredUnique = uniquifyName(newUsername);
+
+            ClientInfo info = data.get(id);
+            info.username = ensuredUnique;
+
+            return ensuredUnique;
+        } finally {
+            writeLock.unlock();
+        }
+    }
+
+    private String uniquifyName(String newUsername) {
+        int i = 1;
+        readLock.lock();
         try {
             Set<String> usernames = getUserlist();
             while (!usernames.add(newUsername)) {
-                newUsername = newUsername.concat(String.valueOf(i));
+                newUsername = newUsername.concat(String.valueOf(i)); // strings are immutable in java, so this creates new object
                 i++;
             }
-            ClientInfo info = data.get(id);
-            info.username = newUsername;
 
             return newUsername;
         } finally {
-            writeLock.unlock();
+            readLock.unlock();
         }
     }
 
@@ -103,8 +117,9 @@ public class ClientsDirectory {
         private String username;
         private final OutputStream webSocketOutput;
 
-        private ClientInfo(OutputStream webSocketOutput) {
+        private ClientInfo(OutputStream webSocketOutput, String username) {
             this.webSocketOutput = webSocketOutput;
+            this.username = username;
         }
     }
 }

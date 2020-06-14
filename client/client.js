@@ -3,7 +3,7 @@
 let connection = null;
 let clientID;
 
-function setUsername() {
+function setUsername(messageType) {
     console.log("--- Setting username... ---");
     const usernameField = document.getElementById("username");
     if (!usernameField.value || usernameField.value.match(/^\s+$/)) {
@@ -14,7 +14,7 @@ function setUsername() {
         username: usernameField.value,
         date: Date.now(),
         id: clientID,
-        type: "username",
+        type: messageType,
     };
     connection.send(JSON.stringify(msg));
 }
@@ -38,16 +38,6 @@ function closeConnection() {
     usernameField.focus();
 }
 
-function updateUserlist(userlist) {
-    var ul = "";
-    var i;
-
-    for (i = 0; i < userlist.length; i++) {
-        ul += userlist[i] + "<br>";
-    }
-    document.getElementById("userlistbox").innerHTML = ul;
-}
-
 function connect() {
     const usernameField = document.getElementById("username");
     if (!usernameField.value || usernameField.value.match(/^\s+$/)) {
@@ -65,7 +55,8 @@ function connect() {
         document.getElementById("send").removeAttribute("disabled");
 
         const loginButton = document.getElementById("login");
-        loginButton.setAttribute("onClick", "setUsername()");
+        loginButton.name = "username";
+        loginButton.setAttribute("onClick", "setUsername(e.target.name)");
         loginButton.value = "Change username";
 
         const leaveButton = document.createElement("input");
@@ -93,9 +84,9 @@ function connect() {
             case "id":
                 clientID = msg.id;
                 console.log(`--- Received ID for client: ${clientID}... ---`);
-                setUsername();
+                setUsername("login");
                 break;
-            case "username":
+            case "login":
                 text = `<b>User <em>${msg.username}</em> signed in at ${timeStr}</b><br>`;
                 break;
             case "message":
@@ -104,11 +95,18 @@ function connect() {
             case "rejectusername":
                 text = `<b>Your username has been set to <em>${msg.username}</em> because the name you chose is in use.</b><br>`;
                 break;
+            case "username":
+                text = `<b>User <em>${msg.username}</em> changed username to <em>${msg.newUsername}</em> at ${timeStr}</b><br>`;
+                break;
             case "userlist":
-                updateUserlist(msg.users);
+                var ul = "";
+                var i;
+                for (i = 0; i < msg.users.length; i++) {
+                    ul += msg.users[i] + "<br>";
+                }
+                document.getElementById("userlistbox").innerHTML = ul;
                 break;
             case "userleft":
-                updateUserlist(msg.users);
                 text = `<b>User <em>${msg.username}</em> left at ${timeStr}</b><br>`;
                 break;
         }
@@ -144,7 +142,7 @@ function handleKey(evt) {
                 break;
             case "username":
                 if (clientID) {
-                    setUsername();
+                    setUsername(evt.target.name);
                 } else {
                     connect();
                 }
