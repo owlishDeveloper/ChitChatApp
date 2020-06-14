@@ -110,14 +110,21 @@ public class ClientConnectionHandler extends Thread {
                     switch (message.type) {
                         case "username":
                             String newUsername = clientsDirectory.uniquifyAndChangeName(clientId, message.username);
-                            message.setUsername(clientsDirectory.lookupUsername(clientId));
+
+                            if (!message.username.equals(newUsername)) {
+                                Message rejectUserMessage = new Message(newUsername, clientId);
+                                byte[] rejectUserMessageSerialized = serialize(rejectUserMessage);
+                                output.write(rejectUserMessageSerialized, 0, rejectUserMessageSerialized.length);
+                            }
+                            message.username = newUsername;
+
                             Set<String> users = clientsDirectory.getUserlist();
                             Message userlistMessage = new Message(users);
-                            byte [] userlistMessageBytes = serialize(userlistMessage);
-                            clientsDirectory.sendToAll(userlistMessageBytes);
+                            clientsDirectory.sendToAll(serialize(userlistMessage));
+
                             break;
                         case "message":
-                            message.setUsername(clientsDirectory.lookupUsername(clientId));
+                            message.username = clientsDirectory.lookupUsername(clientId);
                             break;
                     }
 

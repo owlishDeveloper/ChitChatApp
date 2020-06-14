@@ -63,8 +63,4 @@ public class Message {
         this.username = username;
         this.id = id;
     }
-
-    public void setUsername(String username) {
-        this.username = username;
-    }
 }
