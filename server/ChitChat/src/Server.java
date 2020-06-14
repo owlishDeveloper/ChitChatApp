@@ -4,9 +4,12 @@ import java.net.Socket;
 import java.util.UUID;
 
 public class Server {
+    private static final int SO_TIMEOUT = 120000;
+    private static final int PORT_NO = 80;
+
     public static void main(String[] args) {
 
-        try (ServerSocket server = new ServerSocket(80)) {
+        try (ServerSocket server = new ServerSocket(PORT_NO)) {
             ClientsDirectory clientsDirectory = new ClientsDirectory();
 
             System.out.println(String.format("Server started on %s", server.getLocalPort()));
@@ -14,6 +17,7 @@ public class Server {
             while (true) {
                 Socket connection = server.accept();
                 System.out.println("New client connected;");
+                connection.setSoTimeout(SO_TIMEOUT); // close connection after 5 mins of inactivity
 
                 UUID clientId = UUID.randomUUID();
                 Thread clientConnection = new ClientConnectionHandler(connection, clientId, clientsDirectory);

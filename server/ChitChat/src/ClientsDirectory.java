@@ -108,6 +108,8 @@ public class ClientsDirectory {
         readLock.lock();
         try {
             return data.get(id).username;
+        } catch (NullPointerException e) {
+            return null;
         } finally {
             readLock.unlock();
         }

@@ -22,20 +22,6 @@ function setUsername(messageType) {
 function closeConnection() {
     console.log("--- Closing connection... ---");
     connection.close();
-    clientID = undefined;
-
-    document.getElementById("manageconnection").removeChild(document.getElementById("leavechat"));
-
-    const loginButton = document.getElementById("login");
-    loginButton.setAttribute("onClick", "connect()");
-    loginButton.value = "Enter chat";
-
-    document.getElementById("message").setAttribute("disabled", "true");
-    document.getElementById("send").setAttribute("disabled", "true");
-
-    const usernameField = document.getElementById("username")
-    usernameField.value = "";
-    usernameField.focus();
 }
 
 function connect() {
@@ -48,7 +34,7 @@ function connect() {
 
     console.log(`--- Created WebSocket for client ${clientID}... ---`);
 
-    connection.onopen = function (e) {
+    connection.onopen = function () {
         const messageField = document.getElementById("message");
         messageField.removeAttribute("disabled");
         messageField.focus();
@@ -74,7 +60,13 @@ function connect() {
         console.log("--- Received message... ---");
         let f = document.getElementById("chatbox").contentDocument;
         let text = "";
-        let msg = JSON.parse(evt.data);
+        let msg = "";
+        try {
+            msg = JSON.parse(evt.data);
+        } catch (e) {
+            console.error(e);
+            msg = "--- Couldn't parse the message... ---"
+        }
         console.log("Message received: ");
         console.dir(msg);
         let time = new Date(msg.date);
@@ -116,6 +108,32 @@ function connect() {
             document.getElementById("chatbox").contentWindow.scrollByPages(1);
         }
     };
+
+    connection.onerror = function(evt) {
+        console.error("WebSocket error observed:", evt);
+        alert("WebSocket error! Please reload the page");
+    };
+
+    connection.onclose = function(evt) {
+        clientID = undefined;
+
+        document.getElementById("manageconnection").removeChild(document.getElementById("leavechat"));
+
+        const loginButton = document.getElementById("login");
+        loginButton.setAttribute("onClick", "connect()");
+        loginButton.value = "Enter chat";
+
+        document.getElementById("message").setAttribute("disabled", "true");
+        document.getElementById("send").setAttribute("disabled", "true");
+
+        const usernameField = document.getElementById("username")
+        usernameField.value = "";
+        usernameField.focus();
+
+        document.getElementById("chatbox").contentDocument.write(
+            `<b>You left the chat at ${new Date(Date.now()).toLocaleTimeString()}</b><br>`
+        );
+    }
 }
 
 function send() {
@@ -127,7 +145,18 @@ function send() {
         id: clientID,
         date: Date.now(),
     };
-    connection.send(JSON.stringify(msg));
+    try {
+        connection.send(JSON.stringify(msg));
+    } catch (e) {
+        switch (e) {
+            case "INVALID_STATE_ERR":
+                alert("Connection is not open. Reload the page to login again");
+                throw e;
+            case "SYNTAX_ERR":
+                console.error("Error sending message. The message has unpaired surrogates");
+        }
+    }
+
     messagebox.value = "";
 }
 

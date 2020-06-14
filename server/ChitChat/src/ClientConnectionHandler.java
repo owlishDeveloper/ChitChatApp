@@ -4,7 +4,6 @@ import java.io.*;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -143,12 +142,16 @@ public class ClientConnectionHandler extends Thread {
                 connection.shutdownOutput();
                 cleanupStateAndNotifyAll();
 
-            } catch (NoSuchAlgorithmException e) {
+            } catch (Exception e) {
+                System.out.println(String.format("Exception on thread %s. Cleaning up...", Thread.currentThread().getName()));
                 e.printStackTrace();
+                cleanupStateAndNotifyAll();
             }
 
         } catch (IOException e) {
+            System.out.println(String.format("IOException on thread %s. Cleaning up...", Thread.currentThread().getName()));
             e.printStackTrace();
+            cleanupStateAndNotifyAll();
         }
     }
 
@@ -180,8 +183,10 @@ public class ClientConnectionHandler extends Thread {
 
         // notify other clients
         broadcastUserlist();
-        Message userleftMessage = new Message(username);
-        clientsDirectory.sendToAll(serialize(userleftMessage));
+        if (username != null) {
+            Message userleftMessage = new Message(username);
+            clientsDirectory.sendToAll(serialize(userleftMessage));
+        }
     }
 
     /**
