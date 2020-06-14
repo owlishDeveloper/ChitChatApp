@@ -136,6 +136,32 @@ public class ClientConnectionHandler extends Thread {
     }
 
     /**
+     * Helper function to convert a WebSocket message into a Message object
+     * Does not process encoded messages. For testing purposes only
+     *
+     * @param bytes - WebSocket message
+     * @return Message object
+     */
+    private Message deserialize(byte[] bytes) {
+        System.out.println(String.format("Start byte in dserialize is %s", (int)bytes[0]));
+
+        long messageLength = bytes[1];
+        int runningIndex = 2;
+        if (messageLength == 126) {
+            runningIndex = 4;
+        } else if (messageLength == 127) {
+            runningIndex = 6;
+        }
+
+        // Deserialize
+        String messageString = new String(Arrays.copyOfRange(bytes, runningIndex, bytes.length));
+        System.out.println(String.format("Test deserialize: %s", messageString));
+        Message message = gson.fromJson(messageString, Message.class);
+
+        return message;
+    }
+
+    /**
      * Helper function to convert a Message object into valid full WebSocket message
      * in the form of array of bytes ready to send over network.
      *
@@ -148,9 +174,24 @@ public class ClientConnectionHandler extends Thread {
         byte[] payload = gson.toJson(message).getBytes(StandardCharsets.UTF_8);
 
         long messageLength = payload.length;
+        // The MSB of the second byte is used for mask
+        // Mask will be 0 here because I will not encode messages
+        // See more here https://tools.ietf.org/html/rfc6455#section-5.2
         byte[] messageLength_bytes;
-        if (messageLength == 255) {
-            messageLength_bytes = new byte[8];
+        if (messageLength <= 125) {
+            messageLength_bytes = new byte[1];
+            messageLength_bytes[0] = (byte) messageLength;
+        } else if (messageLength >= 126 && messageLength <= 65535) {
+            messageLength_bytes = new byte[3];
+            messageLength_bytes[0] = (byte) 126;
+            messageLength_bytes[2] = (byte) messageLength;
+            messageLength >>>= 8;
+            messageLength_bytes[1] = (byte) messageLength;
+        } else {
+            messageLength_bytes = new byte[9];
+            messageLength_bytes[0] = (byte) 127;
+            messageLength_bytes[8] = (byte) messageLength;
+            messageLength >>>= 8;
             messageLength_bytes[7] = (byte) messageLength;
             messageLength >>>= 8;
             messageLength_bytes[6] = (byte) messageLength;
@@ -164,16 +205,6 @@ public class ClientConnectionHandler extends Thread {
             messageLength_bytes[2] = (byte) messageLength;
             messageLength >>>= 8;
             messageLength_bytes[1] = (byte) messageLength;
-            messageLength >>>= 8;
-            messageLength_bytes[0] = (byte) messageLength;
-        } else if (messageLength == 254) {
-            messageLength_bytes = new byte[2];
-            messageLength_bytes[1] = (byte) messageLength;
-            messageLength >>>= 8;
-            messageLength_bytes[0] = (byte) messageLength;
-        } else {
-            messageLength_bytes = new byte[1];
-            messageLength_bytes[0] = (byte) messageLength;
         }
 
         byte[] messageBytes = new byte[1 + messageLength_bytes.length + payload.length];
