@@ -47,18 +47,35 @@ public class ClientsDirectory {
         }
     }
 
+    public void cleanupConnections(Collection<UUID> ids) {
+        writeLock.lock();
+        try {
+            ids.forEach(id -> data.remove(id));
+        } finally {
+            writeLock.unlock();
+        }
+    }
+
     public void sendToAll(byte[] message) {
+        Collection<UUID> closedSockets = new HashSet<>();
         readLock.lock();
         try {
             data.forEach((k, v) -> {
                 try {
                     v.webSocketOutput.write(message, 0, message.length);
                 } catch (IOException e) {
-                    e.printStackTrace();
+                    if (e.getMessage().equals("Socket closed")) {
+                        closedSockets.add(k);
+                    } else {
+                        e.printStackTrace();
+                    }
                 }
             });
         } finally {
             readLock.unlock();
+            if (!closedSockets.isEmpty()) {
+                cleanupConnections(closedSockets);
+            }
         }
     }
 

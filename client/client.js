@@ -19,6 +19,35 @@ function setUsername() {
     connection.send(JSON.stringify(msg));
 }
 
+function closeConnection() {
+    console.log("--- Closing connection... ---");
+    connection.close();
+    clientID = undefined;
+
+    document.getElementById("manageconnection").removeChild(document.getElementById("leavechat"));
+
+    const loginButton = document.getElementById("login");
+    loginButton.setAttribute("onClick", "connect()");
+    loginButton.value = "Enter chat";
+
+    document.getElementById("message").setAttribute("disabled", "true");
+    document.getElementById("send").setAttribute("disabled", "true");
+
+    const usernameField = document.getElementById("username")
+    usernameField.value = "";
+    usernameField.focus();
+}
+
+function updateUserlist(userlist) {
+    var ul = "";
+    var i;
+
+    for (i = 0; i < userlist.length; i++) {
+        ul += userlist[i] + "<br>";
+    }
+    document.getElementById("userlistbox").innerHTML = ul;
+}
+
 function connect() {
     const usernameField = document.getElementById("username");
     if (!usernameField.value || usernameField.value.match(/^\s+$/)) {
@@ -38,6 +67,14 @@ function connect() {
         const loginButton = document.getElementById("login");
         loginButton.setAttribute("onClick", "setUsername()");
         loginButton.value = "Change username";
+
+        const leaveButton = document.createElement("input");
+        leaveButton.type = "button";
+        leaveButton.id = "leavechat";
+        leaveButton.name = "leavechat";
+        leaveButton.value = "Leave chat";
+        leaveButton.setAttribute("onClick", "closeConnection()");
+        document.getElementById("manageconnection").appendChild(leaveButton);
 
         console.log(`--- Opened connection for client... ---`);
     };
@@ -68,13 +105,11 @@ function connect() {
                 text = `<b>Your username has been set to <em>${msg.username}</em> because the name you chose is in use.</b><br>`;
                 break;
             case "userlist":
-                var ul = "";
-                var i;
-
-                for (i = 0; i < msg.users.length; i++) {
-                    ul += msg.users[i] + "<br>";
-                }
-                document.getElementById("userlistbox").innerHTML = ul;
+                updateUserlist(msg.users);
+                break;
+            case "userleft":
+                updateUserlist(msg.users);
+                text = `<b>User <em>${msg.username}</em> left at ${timeStr}</b><br>`;
                 break;
         }
 

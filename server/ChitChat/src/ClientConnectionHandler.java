@@ -13,16 +13,17 @@ public class ClientConnectionHandler extends Thread {
     private final Socket connection;
     private final Gson gson = new Gson();
     private final ClientsDirectory clientsDirectory;
+    private final UUID clientId;
 
-    public ClientConnectionHandler(Socket connection, ClientsDirectory clientsDirectory) {
+    public ClientConnectionHandler(Socket connection, UUID clientId, ClientsDirectory clientsDirectory) {
         this.connection = connection;
         this.clientsDirectory = clientsDirectory;
+        this.clientId = clientId;
     }
 
     @Override
     public void run() {
         System.out.println(String.format("Running connection on thread %s", Thread.currentThread().getName()));
-        UUID clientId = UUID.fromString(Thread.currentThread().getName());
 
         try (
                 InputStream input = connection.getInputStream();
@@ -51,13 +52,12 @@ public class ClientConnectionHandler extends Thread {
                 clientsDirectory.addConnection(clientId, output);
 
                 // Get the client ID and send it over
-                System.out.println(String.format("Set new thread name: %s", Thread.currentThread().getName()));
                 Message m = new Message(clientId);
                 byte[] clientIdMessage = serialize(m);
                 output.write(clientIdMessage, 0, clientIdMessage.length);
 
-                // Deserializing messages
-                while (true) {
+                // Handling messages
+                while (!connection.isClosed()) {
                     System.out.println("Listening for messages...");
 
                     // The first byte is FIN, RSV1, RSV2, RSV3 + 4 bits of opcode.
@@ -67,8 +67,11 @@ public class ClientConnectionHandler extends Thread {
                     // So the first byte should be 1000 0001 otherwise disconnect
                     int startByte = input.read();
                     if (startByte != 129) {
-                        connection.close();
                         System.out.println(String.format("The message is not text. Closing connection and terminating thread %s", Thread.currentThread().getName()));
+                        connection.shutdownInput();
+                        connection.shutdownOutput();
+                        connection.close();
+                        cleanupStateAndNotifyAll();
                         return;
                     }
 
@@ -124,6 +127,9 @@ public class ClientConnectionHandler extends Thread {
 
                             break;
                         case "message":
+                            if (message.text.matches("\\s*")) { // don't send empty messages
+                                continue;
+                            }
                             message.username = clientsDirectory.lookupUsername(clientId);
                             break;
                     }
@@ -133,6 +139,11 @@ public class ClientConnectionHandler extends Thread {
                     clientsDirectory.sendToAll(sendBack);
                 }
 
+                System.out.println(String.format("Connection is closed on thread %s. Cleaning up...", Thread.currentThread().getName()));
+                connection.shutdownInput();
+                connection.shutdownOutput();
+                cleanupStateAndNotifyAll();
+
             } catch (NoSuchAlgorithmException e) {
                 e.printStackTrace();
             }
@@ -140,6 +151,21 @@ public class ClientConnectionHandler extends Thread {
         } catch (IOException e) {
             e.printStackTrace();
         }
+    }
+
+    /**
+     * Helper method to avoid repeating the same sequence of steps to cleanup the shared state
+     * and notify other clients that this user has left
+     */
+    private void cleanupStateAndNotifyAll() {
+        String username = clientsDirectory.lookupUsername(clientId);
+
+        clientsDirectory.cleanupConnection(clientId);
+
+        // notify other clients
+        Set<String> users = clientsDirectory.getUserlist();
+        Message userlistMessage = new Message(username, users);
+        clientsDirectory.sendToAll(serialize(userlistMessage));
     }
 
     /**
