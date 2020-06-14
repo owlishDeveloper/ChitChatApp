@@ -2,13 +2,14 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class Server {
     public static void main(String[] args) {
 
         try (ServerSocket server = new ServerSocket(80)) {
-            ConcurrentHashMap<String, OutputStream> usernameToClientOutput = new ConcurrentHashMap<>();
+            ClientsDirectory clientsDirectory = new ClientsDirectory();
 
             System.out.println(String.format("Server started on %s", server.getLocalPort()));
 
@@ -16,8 +17,11 @@ public class Server {
                 Socket connection = server.accept();
                 System.out.println("New client connected;");
 
+                UUID clientId = UUID.randomUUID();
+                Thread clientConnection = new ClientConnectionHandler(connection, clientsDirectory);
+                clientConnection.setName(clientId.toString());
 
-                new ClientConnectionHandler(connection, usernameToClientOutput).start();
+                clientConnection.start();
             }
 
         } catch (IOException e) {

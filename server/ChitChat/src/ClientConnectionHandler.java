@@ -6,23 +6,23 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class ClientConnectionHandler extends Thread {
     private final Socket connection;
     private final Gson gson = new Gson();
-    private final ConcurrentHashMap<String, OutputStream> usernameToClientOutput;
+    private final ClientsDirectory clientsDirectory;
 
-    public ClientConnectionHandler(Socket connection, ConcurrentHashMap<String, OutputStream> usernameToClientOutput) {
+    public ClientConnectionHandler(Socket connection, ClientsDirectory clientsDirectory) {
         this.connection = connection;
-        this.usernameToClientOutput = usernameToClientOutput;
+        this.clientsDirectory = clientsDirectory;
     }
 
     @Override
     public void run() {
         System.out.println(String.format("Running connection on thread %s", Thread.currentThread().getName()));
+        UUID clientId = UUID.fromString(Thread.currentThread().getName());
 
         try (
                 InputStream input = connection.getInputStream();
@@ -47,9 +47,10 @@ public class ClientConnectionHandler extends Thread {
                 }
                 System.out.println("Performed WebSocket handshake.");
 
-                // Generate a client ID and send it over
-                UUID clientId = UUID.randomUUID();
-                Thread.currentThread().setName(clientId.toString());
+                // Add connection to the shared state
+                clientsDirectory.addConnection(clientId, output);
+
+                // Get the client ID and send it over
                 System.out.println(String.format("Set new thread name: %s", Thread.currentThread().getName()));
                 Message m = new Message(clientId);
                 byte[] clientIdMessage = serialize(m);
@@ -108,32 +109,21 @@ public class ClientConnectionHandler extends Thread {
                     // Process
                     switch (message.type) {
                         case "username":
-                            usernameToClientOutput.put(message.username, output);
-                            Set<String> users = usernameToClientOutput.keySet();
-                            Message usernameMessage = new Message(users);
-                            byte [] usernameMessageBytes = serialize(usernameMessage);
-                            usernameToClientOutput.forEach((k, v) -> {
-                                try {
-                                    v.write(usernameMessageBytes, 0, usernameMessageBytes.length);
-                                } catch (IOException e) {
-                                    e.printStackTrace();
-                                }
-                            });
+                            String newUsername = clientsDirectory.uniquifyAndChangeName(clientId, message.username);
+                            message.setUsername(clientsDirectory.lookupUsername(clientId));
+                            Set<String> users = clientsDirectory.getUserlist();
+                            Message userlistMessage = new Message(users);
+                            byte [] userlistMessageBytes = serialize(userlistMessage);
+                            clientsDirectory.sendToAll(userlistMessageBytes);
                             break;
                         case "message":
-                            message.setUsername(usernameToClientOutput.get(message.id)); // todo lookup username by ID
+                            message.setUsername(clientsDirectory.lookupUsername(clientId));
                             break;
                     }
 
                     // serialize the message back and send to all clients
                     byte[] sendBack = serialize(message);
-                    usernameToClientOutput.forEach((k, v) -> {
-                        try {
-                            v.write(sendBack, 0, sendBack.length);
-                        } catch (IOException e) {
-                            e.printStackTrace();
-                        }
-                    });
+                    clientsDirectory.sendToAll(sendBack);
                 }
 
             } catch (NoSuchAlgorithmException e) {
