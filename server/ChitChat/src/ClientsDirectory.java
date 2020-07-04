@@ -1,6 +1,7 @@
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.*;
+import java.util.concurrent.Executor;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -43,6 +44,7 @@ public class ClientsDirectory {
             Set<String> usernames = getUserlist();
             while (!usernames.add(newUsername)) {
                 newUsername = newUsername.concat(String.valueOf(i)); // strings are immutable in java, so this creates new object
+                 //write a unit test to send messages to 1000
                 i++;
             }
 
@@ -78,7 +80,7 @@ public class ClientsDirectory {
                 try {
                     v.webSocketOutput.write(message, 0, message.length);
                 } catch (IOException e) {
-                    if (e.getMessage().equals("Socket closed")) {
+                    if (e.getMessage().equals("Socket closed")) { // IO thread pool. This is slow, sending messages to many at the same time
                         closedSockets.add(k);
                     } else {
                         e.printStackTrace();

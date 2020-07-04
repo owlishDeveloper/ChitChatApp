@@ -52,8 +52,9 @@ import java.util.UUID;
  * id: clientID,
  * date: 2349875459
  */
-public class Message {
-    public String type;
+
+public class Message { // abstract class, and then actual subclasses
+    public String type; // enum
     public UUID id;
     public long date; // represents the amount of ms passed since Jan 1, 1970
     public String username;
@@ -83,3 +84,12 @@ public class Message {
         this.date = Instant.now().toEpochMilli();
     }
 }
+
+//serialize() {
+//    object.toString.toBuytes
+//}
+
+// put seria;lize and deserialize method here
+// //or in WebSocket length
+
+// try to re-implement this in rust and haskell

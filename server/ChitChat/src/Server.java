@@ -4,7 +4,7 @@ import java.net.Socket;
 import java.util.UUID;
 
 public class Server {
-    private static final int SO_TIMEOUT = 120000;
+    private static final int SO_TIMEOUT = 1000 * 60 * 5;
     private static final int PORT_NO = 80;
 
     public static void main(String[] args) {
