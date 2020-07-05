@@ -1,19 +1,13 @@
 import com.google.gson.Gson;
-
 import java.io.*;
 import java.net.Socket;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-// use threadpool instead of one thread per connection, consumer-producer pattern
-/// distribution of distribution work (distributing connections between threads)
-// executor pattern
-// work stealing pool, work stealing algorithm
-public class ClientConnectionHandler extends Thread { // private final, public final or private with getter/setter
+public class ClientConnectionHandler implements Runnable {
     private final Socket connection;
     private final Gson gson = new Gson();
     private final ClientsDirectory clientsDirectory;
