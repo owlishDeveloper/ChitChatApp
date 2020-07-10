@@ -1,11 +1,15 @@
 import com.google.gson.Gson;
 import java.io.*;
 import java.net.Socket;
+import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousSocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.*;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ForkJoinTask;
+import java.util.concurrent.Future;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -49,131 +53,165 @@ public class ClientConnectionHandler implements Runnable {
     public void run() {
         System.out.println(String.format("Running connection on thread %s", Thread.currentThread().getName()));
 
-        try (
-                InputStream input = connection.getInputStream();
-                OutputStream output = connection.getOutputStream()
-        ) {
-            try (Scanner scanner = new Scanner(input, StandardCharsets.UTF_8)) {
-                connection.
-                // Handshake
-                String data = scanner.useDelimiter("\\r\\n\\r\\n").next();
-                Matcher get = Pattern.compile("^GET").matcher(data);
-                if (get.find()) {
-                    Matcher match = Pattern.compile("Sec-WebSocket-Key: (.*)").matcher(data);
-                    match.find();
-                    byte[] response = ("HTTP/1.1 101 Switching Protocols\r\n"
-                            + "Connection: Upgrade\r\n"
-                            + "Upgrade: websocket\r\n"
-                            + "Sec-WebSocket-Accept: "
-                            + Base64.getEncoder().encodeToString(
-                            MessageDigest.getInstance("SHA-1").digest(
-                                    (match.group(1) + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").getBytes(StandardCharsets.UTF_8)))
-                            + "\r\n\r\n").getBytes(StandardCharsets.UTF_8);
-                    output.write(response, 0, response.length);
-                }
-                System.out.println("Performed WebSocket handshake.");
+        ByteBuffer message = ByteBuffer.allocate(10000);
+        Future<Integer> f = connection.read(message);
 
-                // Get the client ID and send it over
-                Message m = new Message(clientId);
-                byte[] clientIdMessage = serialize(m);
-                output.write(clientIdMessage, 0, clientIdMessage.length);
-
-                // Handling messages
-                while (!connection.isClosed()) {
-                    System.out.println("Listening for messages...");
-
-                    int startByte = input.read();
-                    if (startByte != MESSAGE_START_BYTE) {
-                        System.out.println(String.format("The message is not text. Closing connection and terminating thread %s", Thread.currentThread().getName()));
-                        connection.shutdownInput();
-                        connection.shutdownOutput();
-                        connection.close();
-                        cleanupStateAndNotifyAll();
-                        return;
-                    }
-
-                    // Determine the length of the message (in bytes)
-                    long messageLength = input.read() - MASK_BIT_IN_SECOND_BYTE;
-                    if (messageLength == TWO_BYTE_LENGTH_SIGNIFIER) {
-                        int messageLength_part1 = input.read();
-                        int messageLength_part2 = input.read();
-                        messageLength = messageLength_part1 << 8 | messageLength_part2;
-                    } else if (messageLength == FOUR_BYTE_LENGTH_SIGNIFIER) {
-                        int messageLength_part1 = input.read();
-                        int messageLength_part2 = input.read();
-                        int messageLength_part3 = input.read();
-                        int messageLength_part4 = input.read();
-                        messageLength = messageLength_part1 & 0xFF;
-                        messageLength <<= 8;
-                        messageLength |= messageLength_part2 & 0xFF;
-                        messageLength <<= 8;
-                        messageLength |= messageLength_part3 & 0xFF;
-                        messageLength <<= 8;
-                        messageLength |= messageLength_part4 & 0xFF;
-                    }
-
-                    // Next 4 bytes are the masking key to decode the message
-                    byte[] key = new byte[] { (byte)input.read(), (byte)input.read(), (byte)input.read(), (byte)input.read() };
-
-                    // Read and decode the message
-                    byte[] decodedMessage = new byte[Math.toIntExact(messageLength)];
-                    for (int i = 0; i < messageLength; i++) {
-                        decodedMessage[i] = (byte) (input.read() ^ key[i & 0x3]);
-                    }
-
-                    // Deserialize
-                    String messageString = new String(decodedMessage);
-                    System.out.println(String.format("Received message: %s", messageString));
-                    Message message = gson.fromJson(messageString, Message.class);
-
-                    // Process
-                    switch (message.type) {
-                        case "login":
-                            // Add connection to the shared state
-                            String ensuredUniqueName = clientsDirectory.addConnection(clientId, output, message.username);
-                            compareAndMaybeSendRejectuser(message.username, ensuredUniqueName, output);
-                            message.username = ensuredUniqueName;
-                            broadcastUserlist();
-                            break;
-
-                        case "username":
-                            String oldName = clientsDirectory.lookupUsername(clientId);
-                            String newUsername = clientsDirectory.uniquifyAndChangeName(clientId, message.username);
-                            compareAndMaybeSendRejectuser(message.username, newUsername, output);
-                            message.username = oldName;
-                            message.newUsername = newUsername;
-                            broadcastUserlist();
-                            break;
-
-                        case "message":
-                            if (message.text.matches("\\s*")) { // don't send empty messages
-                                continue;
-                            }
-                            message.username = clientsDirectory.lookupUsername(clientId);
-                            break;
-                    }
-
-                    // serialize the message back and send to all clients
-                    byte[] sendBack = serialize(message);
-                    clientsDirectory.sendToAll(sendBack);
-                }
-
-                System.out.println(String.format("Connection is closed on thread %s. Cleaning up...", Thread.currentThread().getName()));
-                connection.shutdownInput();
-                connection.shutdownOutput();
-                cleanupStateAndNotifyAll();
-
-            } catch (Exception e) {
-                System.out.println(String.format("Exception on thread %s. Cleaning up...", Thread.currentThread().getName()));
-                e.printStackTrace();
-                cleanupStateAndNotifyAll();
-            }
-
-        } catch (IOException e) {
-            System.out.println(String.format("IOException on thread %s. Cleaning up...", Thread.currentThread().getName()));
+        try {
+            System.out.println(String.format("Bytes read: %s", f.get()));
+        } catch (InterruptedException e) {
             e.printStackTrace();
-            cleanupStateAndNotifyAll();
+        } catch (ExecutionException e) {
+            e.printStackTrace();
         }
+
+        String s = new String(message.array());
+        System.out.println(String.format("Got handshake: %s", s));
+        Matcher get = Pattern.compile("^GET").matcher(s);
+        if (get.find()) {
+            Matcher match = Pattern.compile("Sec-WebSocket-Key: (.*)").matcher(s);
+            match.find();
+            byte[] response = new byte[0];
+            try {
+                response = ("HTTP/1.1 101 Switching Protocols\r\n"
+                        + "Connection: Upgrade\r\n"
+                        + "Upgrade: websocket\r\n"
+                        + "Sec-WebSocket-Accept: "
+                        + Base64.getEncoder().encodeToString(
+                        MessageDigest.getInstance("SHA-1").digest(
+                                (match.group(1) + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").getBytes(StandardCharsets.UTF_8)))
+                        + "\r\n\r\n").getBytes(StandardCharsets.UTF_8);
+            } catch (NoSuchAlgorithmException e) {
+                e.printStackTrace();
+            }
+            ByteBuffer r = ByteBuffer.wrap(response);
+            connection.write(r);
+        }
+
+//        try (
+//                InputStream input = connection.getInputStream();
+//                OutputStream output = connection.getOutputStream()
+//        ) {
+//            try (Scanner scanner = new Scanner(input, StandardCharsets.UTF_8)) {
+//                connection.
+//                // Handshake
+//                String data = scanner.useDelimiter("\\r\\n\\r\\n").next();
+//                Matcher get = Pattern.compile("^GET").matcher(data);
+//                if (get.find()) {
+//                    Matcher match = Pattern.compile("Sec-WebSocket-Key: (.*)").matcher(data);
+//                    match.find();
+//                    byte[] response = ("HTTP/1.1 101 Switching Protocols\r\n"
+//                            + "Connection: Upgrade\r\n"
+//                            + "Upgrade: websocket\r\n"
+//                            + "Sec-WebSocket-Accept: "
+//                            + Base64.getEncoder().encodeToString(
+//                            MessageDigest.getInstance("SHA-1").digest(
+//                                    (match.group(1) + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").getBytes(StandardCharsets.UTF_8)))
+//                            + "\r\n\r\n").getBytes(StandardCharsets.UTF_8);
+//                    output.write(response, 0, response.length);
+//                }
+//                System.out.println("Performed WebSocket handshake.");
+//
+//                // Get the client ID and send it over
+//                Message m = new Message(clientId);
+//                byte[] clientIdMessage = serialize(m);
+//                output.write(clientIdMessage, 0, clientIdMessage.length);
+//
+//                // Handling messages
+//                while (!connection.isClosed()) {
+//                    System.out.println("Listening for messages...");
+//
+//                    int startByte = input.read();
+//                    if (startByte != MESSAGE_START_BYTE) {
+//                        System.out.println(String.format("The message is not text. Closing connection and terminating thread %s", Thread.currentThread().getName()));
+//                        connection.shutdownInput();
+//                        connection.shutdownOutput();
+//                        connection.close();
+//                        cleanupStateAndNotifyAll();
+//                        return;
+//                    }
+//
+//                    // Determine the length of the message (in bytes)
+//                    long messageLength = input.read() - MASK_BIT_IN_SECOND_BYTE;
+//                    if (messageLength == TWO_BYTE_LENGTH_SIGNIFIER) {
+//                        int messageLength_part1 = input.read();
+//                        int messageLength_part2 = input.read();
+//                        messageLength = messageLength_part1 << 8 | messageLength_part2;
+//                    } else if (messageLength == FOUR_BYTE_LENGTH_SIGNIFIER) {
+//                        int messageLength_part1 = input.read();
+//                        int messageLength_part2 = input.read();
+//                        int messageLength_part3 = input.read();
+//                        int messageLength_part4 = input.read();
+//                        messageLength = messageLength_part1 & 0xFF;
+//                        messageLength <<= 8;
+//                        messageLength |= messageLength_part2 & 0xFF;
+//                        messageLength <<= 8;
+//                        messageLength |= messageLength_part3 & 0xFF;
+//                        messageLength <<= 8;
+//                        messageLength |= messageLength_part4 & 0xFF;
+//                    }
+//
+//                    // Next 4 bytes are the masking key to decode the message
+//                    byte[] key = new byte[] { (byte)input.read(), (byte)input.read(), (byte)input.read(), (byte)input.read() };
+//
+//                    // Read and decode the message
+//                    byte[] decodedMessage = new byte[Math.toIntExact(messageLength)];
+//                    for (int i = 0; i < messageLength; i++) {
+//                        decodedMessage[i] = (byte) (input.read() ^ key[i & 0x3]);
+//                    }
+//
+//                    // Deserialize
+//                    String messageString = new String(decodedMessage);
+//                    System.out.println(String.format("Received message: %s", messageString));
+//                    Message message = gson.fromJson(messageString, Message.class);
+//
+//                    // Process
+//                    switch (message.type) {
+//                        case "login":
+//                            // Add connection to the shared state
+//                            String ensuredUniqueName = clientsDirectory.addConnection(clientId, output, message.username);
+//                            compareAndMaybeSendRejectuser(message.username, ensuredUniqueName, output);
+//                            message.username = ensuredUniqueName;
+//                            broadcastUserlist();
+//                            break;
+//
+//                        case "username":
+//                            String oldName = clientsDirectory.lookupUsername(clientId);
+//                            String newUsername = clientsDirectory.uniquifyAndChangeName(clientId, message.username);
+//                            compareAndMaybeSendRejectuser(message.username, newUsername, output);
+//                            message.username = oldName;
+//                            message.newUsername = newUsername;
+//                            broadcastUserlist();
+//                            break;
+//
+//                        case "message":
+//                            if (message.text.matches("\\s*")) { // don't send empty messages
+//                                continue;
+//                            }
+//                            message.username = clientsDirectory.lookupUsername(clientId);
+//                            break;
+//                    }
+//
+//                    // serialize the message back and send to all clients
+//                    byte[] sendBack = serialize(message);
+//                    clientsDirectory.sendToAll(sendBack);
+//                }
+//
+//                System.out.println(String.format("Connection is closed on thread %s. Cleaning up...", Thread.currentThread().getName()));
+//                connection.shutdownInput();
+//                connection.shutdownOutput();
+//                cleanupStateAndNotifyAll();
+//
+//            } catch (Exception e) {
+//                System.out.println(String.format("Exception on thread %s. Cleaning up...", Thread.currentThread().getName()));
+//                e.printStackTrace();
+//                cleanupStateAndNotifyAll();
+//            }
+//
+//        } catch (IOException e) {
+//            System.out.println(String.format("IOException on thread %s. Cleaning up...", Thread.currentThread().getName()));
+//            e.printStackTrace();
+//            cleanupStateAndNotifyAll();
+//        }
     }
 
     /**
@@ -306,10 +344,6 @@ public class ClientConnectionHandler implements Runnable {
                 payload.length);
 
         return messageBytes;
-    }
-
-    public Boolean connected() {
-        return connection.isConnected();
     }
 }
 
