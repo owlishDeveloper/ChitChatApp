@@ -1,9 +1,11 @@
 import java.io.IOException;
-import java.net.ServerSocket;
-import java.net.Socket;
+import java.net.*;
+import java.nio.channels.AsynchronousServerSocketChannel;
+import java.nio.channels.AsynchronousSocketChannel;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 public class Server {
     private static final int SO_TIMEOUT = 1000 * 60 * 5;
@@ -12,16 +14,15 @@ public class Server {
 
     public static void main(String[] args) {
 
-        try (ServerSocket server = new ServerSocket(PORT_NO)) {
+        try (AsynchronousServerSocketChannel server = AsynchronousServerSocketChannel.open().bind(new InetSocketAddress(PORT_NO))) {
             ClientsDirectory clientsDirectory = new ClientsDirectory();
 
-            System.out.println(String.format("Server started on %s", server.getLocalPort()));
+            System.out.println(String.format("Server started on %s", server.getLocalAddress()));
 
             while (!executor.isShutdown()) {
                 try {
-                    final Socket connection = server.accept();
+                    AsynchronousSocketChannel connection = server.accept().get();
                     System.out.println("New client connected;");
-                    connection.setSoTimeout(SO_TIMEOUT);
 
                     UUID clientId = UUID.randomUUID();
                     Runnable task = new ClientConnectionHandler(connection, clientId, clientsDirectory);

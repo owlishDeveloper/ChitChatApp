@@ -1,14 +1,16 @@
 import com.google.gson.Gson;
 import java.io.*;
 import java.net.Socket;
+import java.nio.channels.AsynchronousSocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
+import java.util.concurrent.ForkJoinTask;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class ClientConnectionHandler implements Runnable {
-    private final Socket connection;
+    private final AsynchronousSocketChannel connection;
     private final Gson gson = new Gson();
     private final ClientsDirectory clientsDirectory;
     private final UUID clientId;
@@ -37,7 +39,7 @@ public class ClientConnectionHandler implements Runnable {
     // these 7 bytes are set to 127.
     private static final int FOUR_BYTE_LENGTH_SIGNIFIER = 127;
 
-    public ClientConnectionHandler(Socket connection, UUID clientId, ClientsDirectory clientsDirectory) {
+    public ClientConnectionHandler(AsynchronousSocketChannel connection, UUID clientId, ClientsDirectory clientsDirectory) {
         this.connection = connection;
         this.clientsDirectory = clientsDirectory;
         this.clientId = clientId;
@@ -52,6 +54,7 @@ public class ClientConnectionHandler implements Runnable {
                 OutputStream output = connection.getOutputStream()
         ) {
             try (Scanner scanner = new Scanner(input, StandardCharsets.UTF_8)) {
+                connection.
                 // Handshake
                 String data = scanner.useDelimiter("\\r\\n\\r\\n").next();
                 Matcher get = Pattern.compile("^GET").matcher(data);
