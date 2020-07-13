@@ -2,10 +2,13 @@ import com.google.gson.Gson;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousSocketChannel;
+import java.nio.channels.CompletionHandler;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -51,6 +54,7 @@ public class ClientConnectionHandler implements Runnable {
     public void run() {
         System.out.println(String.format("Running connection on thread %s", Thread.currentThread().getName()));
 
+        // handshake
         StringBuilder messageBuilder = new StringBuilder();
         Pattern end = Pattern.compile(END_OF_REQUEST_OR_RESPONSE);
 
@@ -63,11 +67,11 @@ public class ClientConnectionHandler implements Runnable {
             if (end.matcher(s).find()) break;
         }
 
-        String message = messageBuilder.toString();
+        String request = messageBuilder.toString();
 
-        Matcher get = Pattern.compile("^GET").matcher(message);
+        Matcher get = Pattern.compile("^GET").matcher(request);
         if (get.find()) {
-            Matcher match = Pattern.compile("Sec-WebSocket-Key: (.*)").matcher(message);
+            Matcher match = Pattern.compile("Sec-WebSocket-Key: (.*)").matcher(request);
             match.find();
             try {
                 ByteBuffer response = ByteBuffer.wrap(("HTTP/1.1 101 Switching Protocols\r\n"
@@ -80,15 +84,115 @@ public class ClientConnectionHandler implements Runnable {
                         + END_OF_REQUEST_OR_RESPONSE).getBytes(StandardCharsets.UTF_8));
 
                 connection.write(response);
-                System.out.println("Performed WebSocket handshake.");
             } catch (NoSuchAlgorithmException e) {
                 e.printStackTrace();
             }
+            System.out.println("Performed WebSocket handshake.");
 
             // Get the client ID and send it over
             Message m = new Message(clientId);
             byte[] clientIdMessage = serialize(m);
             connection.write(ByteBuffer.wrap(clientIdMessage)); // todo: serialize should return ByteBuffer
+        }
+
+        // Handling messages
+        while (connection.isOpen()) {
+            System.out.println("Listening for messages...");
+
+            ByteBuffer sb = ByteBuffer.allocate(1);
+            try {
+                connection.read(sb).get();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            int startByte = Byte.toUnsignedInt(sb.get(0));
+            if (startByte != MESSAGE_START_BYTE) {
+                System.out.println(String.format("The message is not text. Closing connection and terminating thread %s", Thread.currentThread().getName()));
+                try {
+                    connection.shutdownInput();
+                    connection.shutdownOutput();
+                    connection.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+                cleanupStateAndNotifyAll(); // todo
+                return;
+            }
+
+            // Determine the length of the message (in bytes)
+            ByteBuffer ml = ByteBuffer.allocate(1);
+            try {
+                connection.read(ml).get();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            long messageLength = Byte.toUnsignedInt(ml.get(0)) - MASK_BIT_IN_SECOND_BYTE;;
+            if (messageLength == TWO_BYTE_LENGTH_SIGNIFIER) {
+                ByteBuffer l = ByteBuffer.allocate(2);
+                try {
+                    connection.read(l).get();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+                messageLength = Short.toUnsignedLong(l.getShort());
+            } else if (messageLength == FOUR_BYTE_LENGTH_SIGNIFIER) {
+                ByteBuffer l = ByteBuffer.allocate(4);
+                try {
+                    connection.read(l).get();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+                messageLength = Integer.toUnsignedLong(l.getInt());
+            }
+            System.out.println(String.format("Length: %s", messageLength));
+
+            // Next 4 bytes are the masking key to decode the message
+            ByteBuffer key = ByteBuffer.allocate(4);
+            connection.read(key);
+
+            // Read and decode the message
+            ByteBuffer m = ByteBuffer.allocate(Math.toIntExact(messageLength));
+            connection.read(m);
+            byte[] decodedMessage = new byte[Math.toIntExact(messageLength)];
+            for (int i = 0; i < messageLength; i++) {
+                decodedMessage[i] = (byte) (m.get(i) ^ key.get(i & 0x3));
+            }
+
+            // Deserialize
+            String messageString = new String(decodedMessage);
+            System.out.println(String.format("Received message: %s", messageString));
+            Message message = gson.fromJson(messageString, Message.class);
+
+            // Process
+//            switch (message.type) {
+//                case "login":
+//                    // Add connection to the shared state
+//                    String ensuredUniqueName = clientsDirectory.addConnection(clientId, output, message.username);
+//                    compareAndMaybeSendRejectuser(message.username, ensuredUniqueName, output);
+//                    message.username = ensuredUniqueName;
+//                    broadcastUserlist();
+//                    break;
+//
+//                case "username":
+//                    String oldName = clientsDirectory.lookupUsername(clientId);
+//                    String newUsername = clientsDirectory.uniquifyAndChangeName(clientId, message.username);
+//                    compareAndMaybeSendRejectuser(message.username, newUsername, output);
+//                    message.username = oldName;
+//                    message.newUsername = newUsername;
+//                    broadcastUserlist();
+//                    break;
+//
+//                case "message":
+//                    if (message.text.matches("\\s*")) { // don't send empty messages
+//                        continue;
+//                    }
+//                    message.username = clientsDirectory.lookupUsername(clientId);
+//                    break;
+//            }
+//
+//            // serialize the message back and send to all clients
+//            byte[] sendBack = serialize(message);
+//            clientsDirectory.sendToAll(sendBack);
         }
 
 //        try (
@@ -97,85 +201,7 @@ public class ClientConnectionHandler implements Runnable {
 //        ) {
 //            try (Scanner scanner = new Scanner(input, StandardCharsets.UTF_8)) {
 //
-//                // Handling messages
-//                while (!connection.isClosed()) {
-//                    System.out.println("Listening for messages...");
 //
-//                    int startByte = input.read();
-//                    if (startByte != MESSAGE_START_BYTE) {
-//                        System.out.println(String.format("The message is not text. Closing connection and terminating thread %s", Thread.currentThread().getName()));
-//                        connection.shutdownInput();
-//                        connection.shutdownOutput();
-//                        connection.close();
-//                        cleanupStateAndNotifyAll();
-//                        return;
-//                    }
-//
-//                    // Determine the length of the message (in bytes)
-//                    long messageLength = input.read() - MASK_BIT_IN_SECOND_BYTE;
-//                    if (messageLength == TWO_BYTE_LENGTH_SIGNIFIER) {
-//                        int messageLength_part1 = input.read();
-//                        int messageLength_part2 = input.read();
-//                        messageLength = messageLength_part1 << 8 | messageLength_part2;
-//                    } else if (messageLength == FOUR_BYTE_LENGTH_SIGNIFIER) {
-//                        int messageLength_part1 = input.read();
-//                        int messageLength_part2 = input.read();
-//                        int messageLength_part3 = input.read();
-//                        int messageLength_part4 = input.read();
-//                        messageLength = messageLength_part1 & 0xFF;
-//                        messageLength <<= 8;
-//                        messageLength |= messageLength_part2 & 0xFF;
-//                        messageLength <<= 8;
-//                        messageLength |= messageLength_part3 & 0xFF;
-//                        messageLength <<= 8;
-//                        messageLength |= messageLength_part4 & 0xFF;
-//                    }
-//
-//                    // Next 4 bytes are the masking key to decode the message
-//                    byte[] key = new byte[] { (byte)input.read(), (byte)input.read(), (byte)input.read(), (byte)input.read() };
-//
-//                    // Read and decode the message
-//                    byte[] decodedMessage = new byte[Math.toIntExact(messageLength)];
-//                    for (int i = 0; i < messageLength; i++) {
-//                        decodedMessage[i] = (byte) (input.read() ^ key[i & 0x3]);
-//                    }
-//
-//                    // Deserialize
-//                    String messageString = new String(decodedMessage);
-//                    System.out.println(String.format("Received message: %s", messageString));
-//                    Message message = gson.fromJson(messageString, Message.class);
-//
-//                    // Process
-//                    switch (message.type) {
-//                        case "login":
-//                            // Add connection to the shared state
-//                            String ensuredUniqueName = clientsDirectory.addConnection(clientId, output, message.username);
-//                            compareAndMaybeSendRejectuser(message.username, ensuredUniqueName, output);
-//                            message.username = ensuredUniqueName;
-//                            broadcastUserlist();
-//                            break;
-//
-//                        case "username":
-//                            String oldName = clientsDirectory.lookupUsername(clientId);
-//                            String newUsername = clientsDirectory.uniquifyAndChangeName(clientId, message.username);
-//                            compareAndMaybeSendRejectuser(message.username, newUsername, output);
-//                            message.username = oldName;
-//                            message.newUsername = newUsername;
-//                            broadcastUserlist();
-//                            break;
-//
-//                        case "message":
-//                            if (message.text.matches("\\s*")) { // don't send empty messages
-//                                continue;
-//                            }
-//                            message.username = clientsDirectory.lookupUsername(clientId);
-//                            break;
-//                    }
-//
-//                    // serialize the message back and send to all clients
-//                    byte[] sendBack = serialize(message);
-//                    clientsDirectory.sendToAll(sendBack);
-//                }
 //
 //                System.out.println(String.format("Connection is closed on thread %s. Cleaning up...", Thread.currentThread().getName()));
 //                connection.shutdownInput();
