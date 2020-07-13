@@ -1,7 +1,6 @@
-import java.io.IOException;
-import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.nio.channels.AsynchronousSocketChannel;
 import java.util.*;
-import java.util.concurrent.Executor;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -11,7 +10,7 @@ public class ClientsDirectory {
     private Lock readLock = lock.readLock();
     private Lock writeLock = lock.writeLock();
 
-    public String addConnection(UUID id, OutputStream stream, String username) {
+    public String addConnection(UUID id, AsynchronousSocketChannel stream, String username) {
         writeLock.lock();
         try {
             String ensuredUnique = uniquifyName(username);
@@ -78,8 +77,8 @@ public class ClientsDirectory {
         try {
             data.forEach((k, v) -> {
                 try {
-                    v.webSocketOutput.write(message, 0, message.length);
-                } catch (IOException e) {
+                    v.channel.write(ByteBuffer.wrap(message));
+                } catch (Exception e) {
                     if (e.getMessage().equals("Socket closed")) { // IO thread pool. This is slow, sending messages to many at the same time
                         closedSockets.add(k);
                     } else {
@@ -119,10 +118,10 @@ public class ClientsDirectory {
 
     private static class ClientInfo {
         private String username;
-        private final OutputStream webSocketOutput;
+        private final AsynchronousSocketChannel channel;
 
-        private ClientInfo(OutputStream webSocketOutput, String username) {
-            this.webSocketOutput = webSocketOutput;
+        private ClientInfo(AsynchronousSocketChannel channel, String username) {
+            this.channel = channel;
             this.username = username;
         }
     }
