@@ -6,10 +6,12 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
+import java.util.concurrent.ForkJoinTask;
+import java.util.concurrent.RecursiveAction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class ClientConnectionHandler implements Runnable {
+public class ClientConnectionHandler extends RecursiveAction {
     private final AsynchronousSocketChannel connection;
     private final Gson gson = new Gson();
     private final ClientsDirectory clientsDirectory;
